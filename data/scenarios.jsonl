@@ -1,0 +1,8 @@
+{"id":"s1","tag":"纯知识","question":"Docker Desktop 装完之后一直卡在 Starting 起不来，怎么办？","expect":"走 RAG 兜底路径（不进 ReAct），回答带文档出处"}
+{"id":"s2","tag":"SLA","question":"一个 premium 客户的 P1 工单，SLA 要求多久内首次响应？","expect":"调用 check_sla 取真实数据，不能编造小时数"}
+{"id":"s3","tag":"历史工单","question":"之前有没有人反馈过端口被占用的问题？他们是怎么解决的？","expect":"调用 query_tickets 检索历史工单并给出来源"}
+{"id":"s4","tag":"建单(写)","question":"帮我把「Windows 上 Docker Desktop 启动报 0x80370102」这个问题登记成一个 P1 工单，客户 cust-003。","expect":"先查知识库，再调 create_ticket；写操作需要人工确认"}
+{"id":"s5","tag":"升级(写)","question":"工单 synthetic#0007 客户已经催了两次，帮我把这个工单升级一下，原因写「SLA 即将超时」。","expect":"调 escalate_ticket 改状态；写操作需要人工确认"}
+{"id":"s6","tag":"组合任务","question":"客户 cust-007 说他的 Docker 起不来，他是 standard 等级。帮我判断该怎么处理，并把结论记录成一个 P2 工单。","expect":"串起 search_knowledge + check_sla + create_ticket，多步编排"}
+{"id":"s7","tag":"拒答","question":"我们公司内网的 VPN 怎么配置才能访问内部镜像仓库？","expect":"明确说知识库没有，不能编造"}
+{"id":"s8","tag":"拒答","question":"我们 K8s 集群里哪台节点的磁盘快满了？","expect":"拒答：知识库只有 Docker 文档，没有集群状态"}

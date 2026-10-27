@@ -1,0 +1,93 @@
+# Milvus Standalone（单机版）—— W2 起使用，W1 不需要启动
+#
+# 启动:  docker compose -f docker/milvus-compose.yml up -d
+# 查看:  docker compose -f docker/milvus-compose.yml ps
+# 日志:  docker compose -f docker/milvus-compose.yml logs -f standalone
+# 停止:  docker compose -f docker/milvus-compose.yml down
+# 清库:  docker compose -f docker/milvus-compose.yml down -v
+#
+# 端口:
+#   19530  gRPC（pymilvus 连这个）
+#   9091   健康检查 /metrics（curl http://localhost:9091/healthz 应返回 OK）
+#
+# 镜像版本对齐 milvus-io/milvus master 分支 deployments/docker/standalone
+# 若拉取失败（quay.io 在国内常被墙），可换成你自己的镜像源，或改用 Zilliz Cloud：
+#   把 .env 里的 MILVUS_URI 改成 https://xxx.zillizcloud.com 并填 MILVUS_TOKEN
+#
+# 内存占用约 2-3 GB，16G 机器够用；第一次启动要拉 ~1.5 GB 镜像。
+
+name: dockerhelp
+
+x-milvus-image: &milvus-image milvusdb/milvus:v3.0.3
+
+services:
+  etcd:
+    container_name: dockerhelp-etcd
+    image: quay.io/coreos/etcd:v3.5.25
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    command: >
+      etcd
+      -advertise-client-urls=http://etcd:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    volumes:
+      - etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    container_name: dockerhelp-minio
+    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - minio_data:/minio_data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  standalone:
+    container_name: dockerhelp-milvus
+    image: *milvus-image
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      MINIO_REGION: us-east-1
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 120s
+      timeout: 20s
+      retries: 5
+    depends_on:
+      etcd:
+        condition: service_started
+      minio:
+        condition: service_started
+
+volumes:
+  etcd_data:
+  minio_data:
+  milvus_data:

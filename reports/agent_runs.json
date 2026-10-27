@@ -1,0 +1,90 @@
+[
+  {
+    "id": "s1",
+    "question": "Docker Desktop 装完之后一直卡在 Starting 起不来，怎么办？",
+    "route": "rag",
+    "status": "done",
+    "steps": 3,
+    "tokens": 1531,
+    "elapsed_ms": 6392,
+    "run_id": "run-f0282fd0ccf6",
+    "answer": "# Docker Desktop 卡在 Starting 的处理思路\n\n## 结论\n\n知识库中**没有**专门针对\"卡在 Starting 起不来\"的完整排障文档，但检索到几条相关依据，可以按下面顺序排查。请注意：**具体根因需要结合你的操作系统和日志确认**，以下部分步骤属于我的推测，建议核实。\n\n## 可依据知识库确认的排查点\n\n**1. 确认是否属于\"安装后未自动启动\"的正常情况**\n> 出处：`manuals/desktop/setup/install/windows-install.md`\n\nDocker Desktop 安装完成后**不会自动启动**。需要手动在开始菜单搜索 Docker 并点击 **Docker Desktop**，首次启动会弹出订阅服务协议（Subscription Service Agreement）需要接受。如果协议窗口没弹出来或被遮挡，界面可能看起来像\"卡住\"。\n\n**2. Windows 下检查 docker-users 组权限（Access Denied 类问题）**\n> 出处：`manuals/desktop/troubleshoot-and-support/troubleshoot/topics.md`\n\n如果你的管理员账户和日常登录账户不是同一个，需要把用户加入 `docker-users` 组：\n1. 以管理员身份运行 **计算机管理**\n2. 进入 **本地用户和组 > 组 > docker-users**\n3. 右键添加你的用户账户\n4. 注销并重新登录后重试\n\n**3. 检查 General 设置项**\n> 出处：`manuals/desktop/settings-and-maintenance/settings.md`\n\nGeneral 设置里有 **\"Start Docker Desktop when you sign in\"** 等启动相关选项，可确认启动行为配置是否符合预期。\n\n**4. 启动失败时的备份/恢复路径**\n> 出处：`manuals/desktop/settings-and-maintenance/backup-and-restore.md`\n\n如果确认是 Docker Desktop VM 层面起不来，文档给出了备份 `.vhdx`（Windows 后端）后重装、再还原 `.vhdx` 并重新导入 WSL 发行版的流程。这是\"重装前先保数据\"的兜底方案。\n\n## 我的推测（知识库未覆盖，建议核实）\n\n- 卡在 Starting 常见原因还包括 WSL2 后端异常、Hyper-V/虚拟化未开启、`daemon.json` 配置冲突等。其中 `daemon.json` 与启动脚本冲突在 `manuals/engine/daemon/troubleshoot.md` 中有讨论，但那是 **Docker Engine + systemd** 场景，**不直接适用于 Docker Desktop**，不要照搬。\n- 建议先收集 Docker Desktop 的诊断日志（Troubleshoot 页面的 \"Get support diagnostic\"）再判断。\n\n## 需要你补充的信息\n\n为了给出更准确的结论，请告诉我：\n1. **操作系统**（Windows / macOS / Linux）及版本？\n2. 是**首次安装后**起不来，还是**之前能用、突然起不来**？\n3. 界面是停在 Starting 转圈，还是有报错弹窗（如 Access Denied）？\n\n---\n\n如果你希望我把这个问题**登记成工单**跟进，或需要**升级处理**，请明确告诉我，并说明客户等级（用于判断 SLA）。目前我还没有查询任何工单或 SLA 数据。"
+  },
+  {
+    "id": "s2",
+    "question": "一个 premium 客户的 P1 工单，SLA 要求多久内首次响应？",
+    "route": "agent",
+    "status": "done",
+    "steps": 4,
+    "tokens": 2678,
+    "elapsed_ms": 2063,
+    "run_id": "run-3b13bc5dc4b6",
+    "answer": "**结论：premium 客户 P1 工单的 SLA 为首次响应 1 小时内，解决时限 8 小时内。**\n\n来源：SLA 查询工具返回的实时数据（premium / P1）。\n\n补充说明：\n- 这是系统返回的 SLA 承诺值，不是我从记忆里推断的。\n- 如果你需要判断某个具体工单是否即将超时、是否需要升级，请把工单号给我，我可以查它的实际状态再判断。"
+  },
+  {
+    "id": "s3",
+    "question": "之前有没有人反馈过端口被占用的问题？他们是怎么解决的？",
+    "route": "agent",
+    "status": "done",
+    "steps": 5,
+    "tokens": 3476,
+    "elapsed_ms": 4321,
+    "run_id": "run-4686a7ab29ea",
+    "answer": "**结论：历史工单里没有找到「端口被占用」的反馈记录**（用关键词「端口被占用」查询，返回 0 条）。不过知识库里有对应的官方排查文档，可以按它来处理。\n\n## 知识库依据\n\n**1. `port already allocated` 报错（Docker Desktop）**\n出处：`manuals/desktop/troubleshoot-and-support/troubleshoot/topics.md`\n\n文档给出的思路是先找出占用该端口的进程，有两种方式：\n- 图形界面：打开 `resmon.exe` → 切到 **Network** 标签 → 查看 **Listening Ports**\n- 命令行：在 PowerShell 执行 `netstat -aon | find /i \"listening \"`，找到正在监听该端口的进程 PID\n\n> 说明：检索到的片段到「获取 PID」这一步就结束了，**后续如何处置该 PID（结束进程还是改映射端口）文档片段里没有给出**。按常规做法是确认进程归属后停掉它，或改用其他宿主机端口重新映射（如 `-p 8081:80`）——**这部分是我的推测，建议核实**，我可以再帮你检索更完整的章节。\n\n**2. 特权端口（<1024）绑定失败**\n出处：`manuals/dhi/how-to/troubleshoot.md`\n\n如果报错不是「被占用」而是权限类失败，注意：非 root 容器默认无法绑定 1024 以下端口，容器运行时和内核都会限制（Kubernetes 和 Docker Engine < 20.10 尤其明显）。解决办法是让容器内应用监听 1025 及以上的非特权端口。\n\n## 我还能帮你做什么\n\n1. 如果你手上有具体的报错原文（比如 `Bind for 0.0.0.0:8080 failed: port is already allocated`），发给我，我按原文再检索一次，定位更精确的章节。\n2. 如果这是当前正在处理的客户问题，告诉我**客户等级和优先级**，我可以查 SLA 并帮你建单登记。\n3. 想确认是否真的没有类似历史工单，我可以换关键词（如「bind」「8080」「端口冲突」）再查一遍——需要的话说一声。"
+  },
+  {
+    "id": "s4",
+    "question": "帮我把「Windows 上 Docker Desktop 启动报 0x80370102」这个问题登记成一个 P1 工单，客户 cust-003。",
+    "route": "agent",
+    "status": "done",
+    "steps": 5,
+    "tokens": 3785,
+    "elapsed_ms": 4673,
+    "run_id": "run-d9980dda8b80",
+    "answer": "**先别急着建单——已经有一批重复工单了。**\n\n## 查重结果\n\n历史工单里已经有 **5 条**完全相同的 open 工单，都是 cust-003、都是 P1、都是这个报错：\n\n| 工单号 | 标题 | 状态 |\n|---|---|---|\n| T-96551-531 | Windows Docker Desktop 启动报 0x80370102 错误 | open |\n| T-96599-532 | Windows Docker Desktop 启动失败：错误代码 0x80370102 | open |\n| T-96672-533 | Windows Docker Desktop 启动失败：错误代码 0x80370102 | open |\n| T-96898-535 | Windows Docker Desktop 启动失败：错误代码 0x80370102 | open |\n| T-97034-537 | Windows Docker Desktop 启动失败：错误代码 0x80370102 | open |\n\n这 5 条都还没有解决方案。再建第 6 条只会让重复工单更多，所以我**暂时没有调用 create_ticket**。\n\n## 知识库检索情况\n\n我检索了知识库，**没有找到直接针对 0x80370102 这个错误码的文档**。相关但不等价的片段有：\n\n- `manuals/desktop/setup/install/windows-install.md` — Windows 系统要求，提到 WSL 2 配置需参考 WSL 章节\n- `manuals/desktop/troubleshoot-and-support/troubleshoot/topics.md` — 杀毒软件与 Hyper-V / Microsoft 虚拟化组件不兼容会导致 Docker Desktop 启动失败\n\n**以下是我的推测，建议核实**：0x80370102 通常与 Windows 上虚拟化平台未启用有关（Hyper-V / 虚拟化在 BIOS 中关闭、WSL 2 未安装或未更新、嵌套虚拟化缺失）。但知识库里没有对应条目，我不能把它当作结论写进工单。\n\n## 请你确认下一步\n\n1. **合并到已有工单**（推荐）：从上面 5 条里选一条作为主单跟进，其余标记为重复。你告诉我用哪条，或者我按最早创建的 T-96551-531 作为主单。\n2. **仍然要新建**：如果这次是不同环境/不同客户现场，请说明区别，我再建单。\n3. **先补充信息**：客户的具体 Windows 版本、是否启用 WSL 2、是否装了杀毒软件——这些能帮助定位，也便于写进工单描述。\n\n另外，这 5 条 P1 工单都是 open 状态，需要我查一下 SLA 是否临近超时吗？（需要你确认客户等级是 premium 还是 standard，我不做假设。）"
+  },
+  {
+    "id": "s5",
+    "question": "工单 synthetic#0007 客户已经催了两次，帮我把这个工单升级一下，原因写「SLA 即将超时」。",
+    "route": "agent",
+    "status": "done",
+    "steps": 6,
+    "tokens": 4757,
+    "elapsed_ms": 4888,
+    "run_id": "run-f54f81e54641",
+    "answer": "**结论：我没有找到「synthetic#0007」这个工单，因此暂时无法执行升级。**\n\n我做了两次查询：\n1. 按关键词 `synthetic#0007` 检索：没有匹配结果。\n2. 列出当前全部工单（返回 10 条）：工单号都是 `T-96551-531`、`T-96699-534`、`T-4690-540` 这类格式，没有 `synthetic#0007` 这种编号。\n\n也就是说，这个编号不在我能查到的工单系统里。按规则，工单号必须来自工具返回的真实数据，我不能自己编一个去升级。\n\n**需要你确认以下信息（任选其一）：**\n- 这个工单的真实工单号是多少？（比如是不是上面列表里的某一条，例如 `T-4690-540`「cust-007 Docker Desktop 无法启动（standard / P2）」）\n- 或者告诉我客户 id 和问题关键词，我帮你定位。\n\n**另外提醒一点：** 你要求升级原因写「SLA 即将超时」，但升级前我需要先用 `check_sla` 核实该工单对应客户等级和优先级的真实 SLA 时限，确认是否真的即将超时。如果实际并未临近超时，我会把原因改成「客户多次催办」这类符合事实的表述，避免记录不实信息。\n\n请把工单号或客户信息给我，我马上核实 SLA 并处理升级。"
+  },
+  {
+    "id": "s6",
+    "question": "客户 cust-007 说他的 Docker 起不来，他是 standard 等级。帮我判断该怎么处理，并把结论记录成一个 P2 工单。",
+    "route": "agent",
+    "status": "done",
+    "steps": 11,
+    "tokens": 9945,
+    "elapsed_ms": 9741,
+    "run_id": "run-4ebdb378398c",
+    "answer": "**工单号：T-5299-541**（P2，客户 cust-007）\n\n下一步建议：把上面「需要补充确认的信息」发给客户，拿到 `journalctl -u docker.service` 输出后我可以帮你继续定位。如果 12 小时内客户仍未响应或问题升级，再考虑是否走升级流程。"
+  },
+  {
+    "id": "s7",
+    "question": "我们公司内网的 VPN 怎么配置才能访问内部镜像仓库？",
+    "route": "rag",
+    "status": "done",
+    "steps": 3,
+    "tokens": 1465,
+    "elapsed_ms": 5201,
+    "run_id": "run-70d6e2633f84",
+    "answer": "## 结论\n\n**知识库中没有找到关于「公司内网 VPN 配置」的内容。** 检索到的 5 篇文档都不涉及 VPN 或企业内网接入方式，因此我无法给出 VPN 的具体配置步骤。\n\n## 检索到的相关内容（供参考，均非 VPN 配置）\n\n| 文档路径 | 内容 | 与你的问题的关系 |\n|---|---|---|\n| `manuals/build-cloud/builder-settings.md` | 私有资源访问认证：内部 npm/PyPI 仓库用 build secrets 在构建时认证 | 讲的是**认证**，不是网络接入 |\n| `manuals/docker-hub/image-library/mirror.md` | 把 Registry 配成 pull-through cache，通过 `proxy` 段配置 remoteurl | 讲的是**镜像代理缓存**，可作为访问内部仓库的替代思路 |\n| `manuals/ai/sandboxes/configuration/registry-mirror.md` | 用 `sbx settings set platform.images.registryMirror` 指定镜像源主机 | 讲的是**镜像源指向**，不涉及 VPN |\n| `manuals/desktop/enterprise/hardened-desktop/namespace-access.md` | Docker Desktop 命名空间访问控制 | 讲的是**权限控制**，不是网络层 |\n| `guides/postgresql.md` | 容器间通过自定义网络用容器名互访 | 讲的是**容器网络**，不是企业 VPN |\n\n## 我的推测（请核实）\n\n如果你们的目标是「让 Docker 能拉到内网镜像仓库的镜像」，通常有两条路，但**这两条都不在知识库中，属于我的推测**：\n\n1. **网络层**：由公司 IT/网络团队提供 VPN 客户端与路由配置，使开发机可达内网 registry 地址。这部分属于企业基础设施，Docker 文档不覆盖。\n2. **镜像层**：若不便走 VPN，可参考 `manuals/docker-hub/image-library/mirror.md`，在内网搭一个 pull-through cache 或 registry mirror，让 Docker 指向它。\n\n## 我可以继续帮你做的事\n\n- 如果你能说明**具体场景**（是 Docker Desktop 拉镜像失败？还是 CI 构建时访问内部仓库？），我可以再针对性检索知识库。\n- 如果确认是内部仓库**认证**问题，`manuals/build-cloud/builder-settings.md` 里的 build secrets 方案可以直接用。\n- 需要的话，我可以帮你**登记一个工单**跟踪这个问题（需要你明确说「建单」）。\n\n另外提醒：你之前创建的工单 **T-5299-541**（cust-007 Docker 服务无法启动，P2）目前状态如何？如果这个问题和它相关，可以一并跟进。"
+  },
+  {
+    "id": "s8",
+    "question": "我们 K8s 集群里哪台节点的磁盘快满了？",
+    "route": "rag",
+    "status": "done",
+    "steps": 3,
+    "tokens": 1296,
+    "elapsed_ms": 3783,
+    "run_id": "run-228328973afa",
+    "answer": "**结论：知识库中没有找到能回答这个问题的内容。**\n\n我检索了知识库，返回的 5 条结果都与\"K8s 集群节点磁盘使用率\"无关：\n\n- `manuals/engine/storage/containerd.md` — 讲的是 containerd 镜像存储比旧存储驱动占用更多磁盘空间的原因，不涉及节点磁盘监控\n- `manuals/engine/daemon/live-restore.md` — 讲 live restore 对运行中容器的影响（FIFO 日志缓冲）\n- `manuals/desktop/enterprise/hardened-desktop/enhanced-container-isolation/limitations.md` — 讲 Docker Desktop Kubernetes 在 Kubeadm 模式下的 ECI 限制\n- `manuals/engine/containers/resource_constraints.md` — 讲 OOM 风险与内存约束\n- `manuals/desktop/settings-and-maintenance/settings.md` — 讲 Docker Desktop 的 Kubernetes 开关设置\n\n这些文档都不包含集群节点磁盘水位的数据或查询方法。\n\n**需要说明的两点：**\n\n1. 节点磁盘使用率是**集群实时状态数据**，不是产品文档能回答的内容，知识库本身也不适合承载这类信息。要拿到答案，需要在集群上实际执行查询，例如：\n   - `kubectl describe node <node>` 查看各节点的 `Conditions`（关注 `DiskPressure`）和 `Allocated resources`\n   - 或登录节点执行 `df -h` / `du -sh /var/lib/containerd`\n   \n   以上命令是我的推测性建议，未经知识库核实，请以你们集群的实际运维规范为准。\n\n2. 如果你希望我继续跟进，可以告诉我：\n   - 这是哪个客户/哪个集群（是否与已有工单 T-5299-541 的 cust-007 相关？）\n   - 是否需要我**创建工单**登记这个磁盘告警排查需求\n\n需要我建单的话，请明确说一声，我再调用建单工具。"
+  }
+]

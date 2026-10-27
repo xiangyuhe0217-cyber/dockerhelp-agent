@@ -1,0 +1,49 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+jieba.cache
+*.log
+
+# ---------- 本项目数据（大文件可由 scripts 重建，不入库） ----------
+# 注意用 data/* 而不是 data/：后者会把整个目录排除，下面的 ! 规则就不生效了
+data/*
+!data/.gitkeep
+!data/eval_cases.jsonl
+!data/scenarios.jsonl
+!data/eval_draft.md
+!data/docs_commit.txt
+.cache/
+
+# ---------- 密钥 ----------
+.env
+.env.local
+*.pem
+*.key
+
+# ---------- 模型与产物 ----------
+*.bin
+*.faiss
+*.pkl
+*.sqlite
+*.db
+*.db-wal
+*.db-shm
+models/
+outputs/
+
+# ---------- 前端 ----------
+web/node_modules/
+web/dist/
+web/.vite/
+
+# ---------- 编辑器 / 系统 ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

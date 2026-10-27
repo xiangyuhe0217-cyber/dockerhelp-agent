@@ -1,0 +1,36 @@
+# ============ 核心 ============
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+
+# ============ Agent（W5 起）============
+langgraph>=1.0
+langgraph-checkpoint-sqlite>=3.0
+openai>=1.40
+
+# ============ 检索（W2 起）============
+# 向量库用 FAISS：零服务依赖、索引可校验（Milvus/Chroma 的坑见 docs/architecture.md）
+faiss-cpu>=1.8
+rank-bm25>=0.2.2
+jieba>=0.42.1
+numpy<3
+
+# ============ 长期记忆（W6 起）============
+# 没装/连不上会自动回退 SQLite（MEMORY_FALLBACK_SQLITE=true）
+redis>=5.0
+
+# ============ 抓取与解析 ============
+requests>=2.32
+tenacity>=8.3
+pyyaml>=6.0
+tqdm>=4.66
+rich>=13.7
+
+# ============ 开发 ============
+pytest>=8.2
+python-dotenv>=1.0
+
+# ---------- 可选（默认不用）----------
+# sentence-transformers  # 只有想跑本地 bge-m3 时才需要，还得配 CUDA 版 torch
+#   → 安装方式见 docs/w1-torch-setup-and-learning.md
