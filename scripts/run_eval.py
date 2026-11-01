@@ -43,6 +43,9 @@ CONFIGS = {
     # W4 第二轮：去掉"万能吸铁石"文档
     "E10": {"mode": "hybrid", "desc": "E8 + 排除 release-notes", "kw": {"rrf_k": 60, "rewrite": True, "exclude": ["manuals/desktop/release-notes", "manuals/desktop/previous-versions", "manuals/engine/release-notes"]}},
     "E11": {"mode": "vector", "desc": "E1 + 排除 release-notes", "kw": {"exclude": ["manuals/desktop/release-notes", "manuals/desktop/previous-versions", "manuals/engine/release-notes"]}},
+    # W8 归因实验：工单案例（cases/*）只有 6 个 chunk 却含大量高频词，
+    # 实测出现在 17/60 题的 Top-5 且全部是噪声。这里量化它的影响。
+    "E12": {"mode": "hybrid", "desc": "E10 但排除工单案例（污染对照）", "kw": {"rrf_k": 60, "rewrite": True, "exclude": ["manuals/desktop/release-notes", "manuals/desktop/previous-versions", "manuals/engine/release-notes", "cases/"]}},
 }
 SUMMARY_PATH = lambda: settings.reports_dir / "eval_summary.json"  # noqa: E731
 COLS = ["hit@1", "hit@5", "hit@10", "recall@5", "recall@10", "mrr", "ndcg@10", "latency_ms"]

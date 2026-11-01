@@ -39,15 +39,31 @@ class RedisMemoryStore:
     backend = "redis"
 
     def __init__(self, user_id: str = "local"):
+        import socket
+
         import redis  # noqa: PLC0415
 
         self.user_id = user_id
+
+        # 先用 1 秒超时的裸 socket 探一下：redis-py 默认会带重试+退避，
+        # 服务没起时要等十几秒才抛错（实测 15s），这会让"回退 SQLite"变得很慢。
+        try:
+            socket.create_connection(
+                (settings.redis_host, settings.redis_port), timeout=1
+            ).close()
+        except OSError as e:  # noqa: PERF203
+            raise ConnectionError(
+                f"{settings.redis_host}:{settings.redis_port} 不可达（{e.__class__.__name__}）"
+            ) from e
+
         self.client = redis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
             db=settings.redis_db,
             password=settings.redis_password or None,
-            socket_timeout=3,
+            socket_timeout=2,
+            socket_connect_timeout=1,
+            retry_on_timeout=False,
             decode_responses=True,
         )
         self.client.ping()  # 连不上就直接抛，交给 get_memory 兜底
@@ -196,22 +212,36 @@ def _render_block(user_id: str, facts: list[dict], events: list[dict]) -> str:
     return "\n".join(lines)
 
 
+_REDIS_COOLDOWN = 30.0  # 秒：Redis 挂掉后多久再试一次
+_redis_retry_at = 0.0  # 在此时间戳之前，不再尝试 Redis
+
+
 def get_memory(user_id: str = "local", backend: str | None = None):
     """按配置返回记忆后端。
 
     Redis 连不上时（容器没起、端口变了）自动回退到 SQLite，并打印一次警告——
     记忆层不该成为整个 Agent 的单点故障。
+
+    为什么要有熔断：每次 get_memory() 都会新建 client 并 ping，
+    Redis 挂掉时每次都要等连接超时。实测一轮测试能因此卡几分钟，
+    Agent 每轮对话也要多等好几秒。所以失败后 30 秒内直接走 SQLite。
     """
+    global _redis_retry_at
+
     backend = (backend or settings.memory_backend).lower()
-    if backend == "redis":
+    if backend == "redis" and time.time() >= _redis_retry_at:
         try:
-            return RedisMemoryStore(user_id)
+            store = RedisMemoryStore(user_id)
+            _redis_retry_at = 0.0  # 连上了就清掉熔断
+            return store
         except Exception as e:  # noqa: BLE001
             if not settings.memory_fallback_sqlite:
                 raise
+            _redis_retry_at = time.time() + _REDIS_COOLDOWN
             print(
                 f"[memory] ⚠ Redis 不可用（{type(e).__name__}: {str(e)[:60]}），"
-                f"本次回退 SQLite。检查：{settings.redis_host}:{settings.redis_port} db={settings.redis_db}"
+                f"回退 SQLite，{_REDIS_COOLDOWN:.0f}s 内不再重试。"
+                f"检查：{settings.redis_host}:{settings.redis_port} db={settings.redis_db}"
             )
             return MemoryStore(user_id)
     return MemoryStore(user_id)

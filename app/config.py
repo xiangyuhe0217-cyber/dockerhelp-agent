@@ -86,7 +86,8 @@ class Settings(BaseSettings):
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
 
     # ---------- 向量库 ----------
-    vector_backend: str = "chroma"  # chroma（默认，免容器） | milvus
+    # 默认 FAISS：零服务依赖、索引文件可校验（Milvus 镜像拉不到；Chroma 在 3441 行静默丢写）
+    vector_backend: str = "faiss"  # faiss（默认） | chroma | milvus
     milvus_uri: str = "http://127.0.0.1:19530"
     milvus_token: str = ""
     milvus_collection: str = "helpdesk_chunks"
@@ -96,7 +97,8 @@ class Settings(BaseSettings):
     embed_dim: int = 1024
 
     # ---------- 向量化 ----------
-    embed_provider: str = "local"  # local | bailian（E5 对照）
+    # 默认百炼 API：不用本地 GPU/模型下载，换环境即可跑
+    embed_provider: str = "bailian"  # bailian（默认） | local
     embed_batch_size: int = 32
     embed_max_seq: int = 1024
     use_cuda: bool = True
