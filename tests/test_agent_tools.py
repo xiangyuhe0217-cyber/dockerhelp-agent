@@ -21,6 +21,7 @@ from app.agent.loop import Agent, classify  # noqa: E402
 from app.agent.tools import TOOLS, execute, is_write_tool  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.db import dao  # noqa: E402
+from langchain_core.messages import HumanMessage  # noqa: E402
 from app.utils.console import setup_console  # noqa: E402
 
 
@@ -120,20 +121,64 @@ def test_search_cases_only_returns_cases() -> None:
 
 
 class _UnsureThenAnswerLLM:
-    """第一次回答自称"没找到"，用来触发级联降级；之后正常作答。"""
+    """第一次回答输出哨兵（自评资料不足），用来触发级联降级；之后正常作答。"""
 
     def __init__(self) -> None:
         self.calls = 0
 
     def chat(self, messages, tools=None, temperature=None, max_tokens=None):
+        from app.agent.graph import INSUFFICIENT_MARK
+
         self.calls += 1
         if self.calls == 1:
             return LLMReply(
-                content="知识库中没有找到相关内容，无法回答这个问题。",
+                content=f"{INSUFFICIENT_MARK}\n知识库中没有找到相关内容，无法回答这个问题。",
                 prompt_tokens=10,
                 completion_tokens=10,
             )
         return LLMReply(content="根据历史工单案例，可以这样处理……", prompt_tokens=10, completion_tokens=10)
+
+
+def test_sentinel_triggers_case_and_is_stripped() -> None:
+    """哨兵出现在开头 → 触发案例补充；最终答案里不能残留哨兵。"""
+    from uuid import uuid4
+
+    from app.agent.graph import INSUFFICIENT_MARK
+
+    agent = Agent(llm=_UnsureThenAnswerLLM(), confirm=lambda n, a: True, persist_trace=False)
+    res = agent.run("容器启动不了怎么办", session_id=f"t-{uuid4().hex[:8]}")
+    tools_called = [s.tool for s in res.steps if s.type == "tool"]
+    assert "search_cases" in tools_called, f"哨兵没有触发案例补充：{tools_called}"
+    assert INSUFFICIENT_MARK not in res.answer, f"哨兵泄漏到最终答案：{res.answer[:120]}"
+    assert res.answer.strip(), "答案为空"
+
+
+class _StreamLLM:
+    """把哨兵拆成多块流式吐出来，验证前端不会看到它。"""
+
+    def chat_stream(self, messages, tools=None):
+        yield "[[INS"
+        yield "UFFICIENT]]"
+        yield "需要更多信息才能判断。"
+
+
+def test_stream_does_not_leak_sentinel() -> None:
+    """流式输出时哨兵必须被挡住（先攒够再决定吐什么）。"""
+    from app.agent.graph import INSUFFICIENT_MARK, GraphAgent
+    from app.agent.stream import set_sink
+
+    agent = GraphAgent(llm=_StreamLLM(), persist_trace=False)
+    tokens: list[str] = []
+    set_sink(lambda kind, payload: tokens.append(payload) if kind == "token" else None)
+    try:
+        reply = agent._generate([HumanMessage(content="测试")])
+    finally:
+        set_sink(None)
+
+    streamed = "".join(tokens)
+    assert INSUFFICIENT_MARK not in streamed, f"哨兵泄漏到流式输出：{streamed!r}"
+    assert streamed.startswith("需要更多信息"), f"流式内容异常：{streamed!r}"
+    assert INSUFFICIENT_MARK in reply.content, "内部仍应保留哨兵用于判断"
 
 
 def test_unsure_answer_triggers_case_before_web() -> None:

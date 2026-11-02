@@ -55,6 +55,9 @@ SYSTEM_PROMPT = """你是「Docker 服务台」的资深技术支持 Agent。你
    ② 案例也没有，再调 web_search 上网搜（引用时必须写「来自网络搜索」）；
    ③ 两者都没有，才如实说"没有找到依据"。
    **绝不**把网上内容说成知识库依据，也**绝不**把外部链接伪装成内部文档路径。
+9. **资料不足时必须在回答的最开头单独输出一行 `[[INSUFFICIENT]]`**（英文方括号原样），
+   再说明缺什么。这个标记是给系统判断是否降级用的，不要解释它、不要加反引号；
+   资料充足时**不要**输出它。
 
 涉及工单、SLA、客户等级时，必须调用 query_tickets / check_sla 取真实数据。"""
 
@@ -120,14 +123,30 @@ UNSURE_MARKERS = (
 )
 
 
-def _looks_unsure(answer: str) -> bool:
-    """模型在答案里表达了"我手上资料不足"。这类回答应当先补一次网络搜索再重写。
+# 模型自评"资料不足"的显式哨兵。要求单独一行输出，便于可靠解析。
+# 为什么不用关键词匹配：模型很爱写「知识库中**没有**」，markdown 符号会把词拆开，
+# 而且换个说法就漏判；显式标记是协议级的，不依赖措辞。
+INSUFFICIENT_MARK = "[[INSUFFICIENT]]"
 
-    注意：必须先把 markdown 符号去掉再匹配 —— 模型很爱写「知识库中**没有**」，
-    `**` 会把「没有」和「知识库中」拆开，直接子串匹配会漏。
+
+def _strip_mark(text: str) -> str:
+    """去掉哨兵标记（它只用于内部控制，不能出现在给用户看的答案里）。"""
+    if not text:
+        return text
+    return text.replace(INSUFFICIENT_MARK, "").lstrip("\n").strip()
+
+
+def _looks_unsure(answer: str) -> bool:
+    """模型是否自评"资料不足"。
+
+    优先看显式哨兵；没有哨兵时退回关键词匹配（兼容没按格式输出的情况）。
+    关键词匹配要先去 markdown 符号 —— 模型爱写「知识库中**没有**」，
+    `**` 会把「没有」和「知识库中」拆开。
     """
     if not answer:
         return False
+    if INSUFFICIENT_MARK in answer:
+        return True
     head = answer[:800]
     # 只去掉 ASCII 的 markdown 符号，避免引入中文标点导致的编码问题
     plain = re.sub(r"[*`#>\s_~|\[\]()\"'\-]", "", head)
@@ -254,14 +273,34 @@ class GraphAgent:
         }
 
     def _generate(self, messages: list, tools: list | None = None) -> LLMReply:
-        """统一生成入口：有订阅者就流式（含工具决策），否则一次性返回。"""
+        """统一生成入口：有订阅者就流式（含工具决策），否则一次性返回。
+
+        流式时要挡住哨兵：`[[INSUFFICIENT]]` 是内部控制信号，不能让用户看到。
+        做法是先攒够能判断"开头是不是哨兵"的长度，再决定吐出什么。
+        """
         if get_sink() is None:
             return self.llm.chat(messages, tools=tools)
 
         parts: list[str] = []
+        held = ""  # 决策前先攒着，避免哨兵被流出去
+        decided = False
         for delta in self.llm.chat_stream(messages, tools=tools):
             parts.append(delta)
-            emit("token", delta)
+            if decided:
+                emit("token", delta)
+                continue
+            held += delta
+            # 还是哨兵的前缀 → 继续攒，先不吐
+            if len(held) < len(INSUFFICIENT_MARK) and INSUFFICIENT_MARK.startswith(held):
+                continue
+            decided = True
+            text = held[len(INSUFFICIENT_MARK):] if held.startswith(INSUFFICIENT_MARK) else held
+            if text:
+                emit("token", text)
+
+        if not decided and held:  # 答案极短，没走到决策点
+            emit("token", held)
+
         content = "".join(parts)
         calls = list(getattr(self.llm, "last_tool_calls", []) or [])
         # 流式拿不到精确 usage，按字符数粗估（只影响界面显示）
@@ -344,20 +383,25 @@ class GraphAgent:
         for s in extra_steps:
             merged_steps.append(s["steps"][-1])
 
+        # 哨兵只用于内部控制，最终答案里必须去掉
+        answer = _strip_mark(reply.content)
+        if not answer:
+            answer = "抱歉，知识库里没有找到足够的依据，也没有搜到可靠的外部资料。"
+
         suffix = "（已补充案例）" if case_used else ""
         suffix += "（已补充网络搜索）" if web_used else ""
         step = _step(
             {**state, "steps": merged_steps},
             type="answer",
             thought="基于检索结果生成回答" + suffix,
-            observation=reply.content,
+            observation=answer,
             latency_ms=int((time.time() - t0) * 1000),
             tokens=reply.total_tokens,
         )
         return {
             **step,
-            "messages": [AIMessage(content=reply.content)],
-            "answer": reply.content,
+            "messages": [AIMessage(content=answer)],
+            "answer": answer,
             "case_used": case_used,
             "status": "done",
             "web_used": web_used,
