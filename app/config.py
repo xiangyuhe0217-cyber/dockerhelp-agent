@@ -125,6 +125,13 @@ class Settings(BaseSettings):
         "manuals/engine/release-notes"
     )
 
+    # ---------- 工单案例（闭环产生，单独一路召回）----------
+    # 实测：案例只有 6 个 chunk 却含大量高频词，会出现在 17/60 题的 Top-5 且全是噪声。
+    # 所以默认**不进主排序**，只在「主检索为空」或「用户问到历史/工单」时补充召回。
+    case_docs_prefix: str = "cases/"
+    case_inline: bool = False  # True = 案例参与主排序（旧行为，会污染排名）
+    case_supplement_topk: int = 3
+
     # ---------- 重排后端 ----------
     rerank_provider: str = "bailian"  # bailian（gte-rerank API）| local（bge-reranker）
     bailian_rerank_model: str = "gte-rerank-v2"

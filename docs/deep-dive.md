@@ -299,7 +299,7 @@ latency_ms
 | 5 条拒答题无生成层评测 | 没有"该拒答时是否拒答"的指标 | 加 refusal accuracy |
 | ~~`chunk_size` 没做消融~~ | 已补：256/400 打平（0.750），600 -5pp；400 是成本折中 | 见 [`reports/chunk_size_ablation.md`](../reports/chunk_size_ablation.md) |
 | ~~默认配置与实际不符~~ | 已修：`vector_backend` 默认 faiss、`embed_provider` 默认 bailian | 已改 `config.py:89/101` |
-| **案例库污染** | `cases/*` 出现在 17/60 题 Top-5 且全是噪声；排除后 MRR +4.5pp（E12） | 案例改为补充召回，不参与主排序 |
+| ~~案例库污染~~ | 已修（方案 A）：主检索排除 `cases/*`，改为「主检索为空 / 用户问历史工单」时补充召回；泄漏 17/60 → **0/60** | 见 [`docs/w8-report.md`](w8-report.md) 第九节 |
 | 二级降级靠文本匹配 | 模型换措辞就漏判 | 改成结构化判断 |
 | 单进程全局锁 | 不能并发 | 每请求一个 Agent 实例 |
 

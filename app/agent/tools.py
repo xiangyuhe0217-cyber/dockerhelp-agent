@@ -81,25 +81,75 @@ def _get_retriever():
 # --------------------------------------------------------------------------- #
 # 工具实现
 # --------------------------------------------------------------------------- #
+# 用户明确在问"别人的经验"时，才把工单案例捞出来
+CASE_HINTS = ("历史", "工单", "案例", "之前", "以前", "类似", "别人", "synthetic", "ticket")
+
+
+def _fmt_hit(idx: int, hit, label_prefix: str = "") -> str:
+    doc = _chunk_to_doc.get(hit.id, "") if _chunk_to_doc else ""
+    body = " ".join(hit.content.split())[:320]
+    return (
+        f"[{label_prefix}{idx}] {hit.heading_path or '(无标题)'}\n"
+        f"    出处: {doc}\n"
+        f"    内容: {body}"
+    )
+
+
+def _needs_case_supplement(query: str, has_main: bool) -> bool:
+    """什么时候把工单案例作为补充召回。
+
+    两个触发条件（都是确定性的，不额外花 LLM 调用）：
+      1. 主检索一条都没有 → 案例是最后的内部依据；
+      2. 用户在问历史/别人的经验 → 本来就该给案例。
+    其余情况不召回，避免像 release-notes 那样污染主排序。
+    """
+    if settings.case_inline:
+        return False  # 旧行为：案例已经混在主结果里了
+    if not has_main:
+        return True
+    return any(k in query for k in CASE_HINTS)
+
+
 def search_knowledge(query: str, top_k: int = 5) -> str:
-    """在 Docker 官方文档里检索，返回带出处的片段。"""
+    """在知识库里检索，返回带出处的片段。
+
+    分两路：
+      · 主召回：官方文档（排除 release-notes 与工单案例）
+      · 补充召回：工单案例（仅在需要时，单独成段，标注为"内部沉淀"）
+    """
     r = _get_retriever()
-    # W4 的最优配置：混合召回 + 查询改写 + 排除 release-notes
+    exclude = list(settings.exclude_prefixes)
+    if not settings.case_inline:
+        exclude.append(settings.case_docs_prefix)
+
     hits = r.search(
         query,
         mode="hybrid",
         top_k=top_k,
         rewrite=True,
-        exclude=settings.exclude_prefixes,
+        exclude=exclude,
     )
-    if not hits:
+
+    blocks = [_fmt_hit(i, h) for i, h in enumerate(hits, 1)]
+
+    if _needs_case_supplement(query, bool(hits)):
+        cases = r.search(
+            query,
+            mode="hybrid",
+            top_k=settings.case_supplement_topk,
+            rewrite=True,
+            exclude=settings.exclude_prefixes,
+            only=[settings.case_docs_prefix],
+        )
+        if cases:
+            blocks.append(
+                "\n【历史工单案例】（内部沉淀，仅供参考；结论要结合当前环境复核）"
+            )
+            blocks += [_fmt_hit(i, h, "C") for i, h in enumerate(cases, 1)]
+
+    if not blocks:
         return "知识库中没有找到相关内容。"
-    lines = []
-    for i, h in enumerate(hits, 1):
-        doc = _chunk_to_doc.get(h.id, "") if _chunk_to_doc else ""
-        body = " ".join(h.content.split())[:320]
-        lines.append(f"[{i}] {h.heading_path or '(无标题)'}\n    出处: {doc}\n    内容: {body}")
-    return "\n".join(lines)
+    return "\n".join(blocks)
 
 
 def web_search(query: str, top_k: int = 5) -> str:

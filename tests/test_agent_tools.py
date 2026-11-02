@@ -97,6 +97,21 @@ def test_search_knowledge_returns_citations() -> None:
     assert "出处" in out, out[:200]
 
 
+def test_case_docs_not_in_main_results() -> None:
+    """工单案例不能混进主排序（实测会污染 17/60 题的排名）。"""
+    out = execute("search_knowledge", {"query": "Docker 容器启动很慢怎么排查", "top_k": 5})[0]
+    assert "cases/" not in out, f"主结果里出现了案例：{out[:300]}"
+
+
+def test_case_supplement_on_history_query() -> None:
+    """用户明确问"之前的工单/别人怎么解决"时，才补充召回案例。"""
+    out = execute(
+        "search_knowledge", {"query": "之前有没有类似的工单案例可以参考", "top_k": 3}
+    )[0]
+    assert "【历史工单案例】" in out, f"没有触发案例补充：{out[:300]}"
+    assert "cases/" in out, out[:300]
+
+
 # --------------------------------------------------------------------------- #
 # ReAct 中间件：重复调用拦截
 # --------------------------------------------------------------------------- #

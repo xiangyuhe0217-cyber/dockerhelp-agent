@@ -237,14 +237,18 @@ class Retriever:
         rerank_in: int | None = None,
         rewrite: bool = False,
         exclude: Sequence[str] | None = None,
+        only: Sequence[str] | None = None,
     ) -> list[Hit]:
         """可注入参数的检索。
 
-        rrf_k / rerank_in / rewrite / exclude 都是给 W4 消融实验用的；
+        rrf_k / rerank_in / rewrite / exclude / only 都是给消融实验与分层召回用的；
         生产调用走默认值（settings）即可。
 
         exclude：文档路径前缀黑名单（如 release-notes）。这类页面把每个功能都提过一遍，
         对几乎任何 query 都有表面相关性，是典型的"万能吸铁石"，会把真正答案挤下去。
+
+        only：白名单（如只要 cases/*）。用于"案例单独一路召回"，
+        避免工单案例混进主排序污染官方文档的排名。
         """
         if mode not in MODES:
             raise ValueError(f"mode 必须是 {MODES}")
@@ -254,18 +258,18 @@ class Retriever:
         k_rrf = rrf_k or settings.rrf_k
         n_rerank = rerank_in or settings.rerank_topk
 
-        # 有黑名单时多召回一些，过滤后仍有足够的候选
-        fetch_k = recall_k * 3 if exclude else recall_k
+        # 有过滤条件时多召回一些，过滤后仍有足够的候选
+        fetch_k = recall_k * 3 if (exclude or only) else recall_k
 
         def keep(ranked: list[tuple[str, float]]) -> list[tuple[str, float]]:
-            if not exclude:
+            if not exclude and not only:
                 return ranked
-            return [(cid, s) for cid, s in ranked if not self._is_excluded(cid, exclude)]
+            return [(cid, s) for cid, s in ranked if self._passes(cid, exclude, only)]
 
         def keep_hits(hits: list[Hit]) -> list[Hit]:
-            if not exclude:
+            if not exclude and not only:
                 return hits
-            return [h for h in hits if not self._is_excluded(h.id, exclude)]
+            return [h for h in hits if self._passes(h.id, exclude, only)]
 
         if mode == "vector":
             ranked = keep(self._vector_search(query, fetch_k))
@@ -298,10 +302,23 @@ class Retriever:
         candidates = keep_hits(self._hydrate(fused[:n_rerank], "fused"))
         return self.reranker.rerank(query, candidates, top_k)
 
-    # ---------- 黑名单 ----------
+    # ---------- 黑名单 / 白名单 ----------
     def _is_excluded(self, chunk_id: str, exclude: Sequence[str]) -> bool:
         path = self.chunk_to_doc.get(chunk_id, "")
         return any(path.startswith(p) for p in exclude)
+
+    def _passes(
+        self,
+        chunk_id: str,
+        exclude: Sequence[str] | None,
+        only: Sequence[str] | None,
+    ) -> bool:
+        path = self.chunk_to_doc.get(chunk_id, "")
+        if exclude and any(path.startswith(p) for p in exclude):
+            return False
+        if only and not any(path.startswith(p) for p in only):
+            return False
+        return True
 
     # ---------- 回填正文 ----------
     def _hydrate(self, ranked: list[tuple[str, float]], source: str) -> list[Hit]:
