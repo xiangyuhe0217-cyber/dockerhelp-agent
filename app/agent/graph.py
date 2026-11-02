@@ -50,9 +50,11 @@ SYSTEM_PROMPT = """你是「Docker 服务台」的资深技术支持 Agent。你
 5. **不编造**。工单号、SLA 数字、客户信息必须来自工具返回，不能自己生成。
 6. **回答用中文**，结构清晰，先给结论再给步骤。
 7. 用户信息不足时（比如没说客户等级），先问清楚，不要自己假设。
-8. **知识库没找到时不要就此拒答**：调用 web_search 去网上搜一次，
-   把结果当作"旁证"补充给用户。引用网上内容必须显式写「来自网络搜索」，
-   **绝不能说成知识库依据**；也不要把网上的链接伪装成内部文档路径。
+8. **知识库没找到时按顺序降级，不要直接拒答**：
+   ① 先调 search_cases 看内部历史工单案例（引用时写「参考历史工单案例」）；
+   ② 案例也没有，再调 web_search 上网搜（引用时必须写「来自网络搜索」）；
+   ③ 两者都没有，才如实说"没有找到依据"。
+   **绝不**把网上内容说成知识库依据，也**绝不**把外部链接伪装成内部文档路径。
 
 涉及工单、SLA、客户等级时，必须调用 query_tickets / check_sla 取真实数据。"""
 
@@ -96,6 +98,7 @@ class AgentState(TypedDict, total=False):
     seen: dict[str, int]
     user_id: str
     web_used: bool
+    case_used: bool
 
 
 def _kb_empty(obs: str) -> bool:
@@ -275,9 +278,40 @@ class GraphAgent:
         reply = self._generate(messages)
         extra_steps: list[dict] = []
         web_used = bool(state.get("web_used"))
+        case_used = bool(state.get("case_used"))
 
-        # 降级②：模型自己承认"知识库没有/没找到" → 去网上补一次，再重新生成。
-        # 这是最贴近用户预期的一条：不是等零命中，而是模型判断"资料不够"时就搜。
+        # 级联降级：模型自评"资料不足" → ① 先补工单案例 → ② 仍不足再上网。
+        # 为什么用模型自评而不是检索分数：实测向量余弦/重排分/名次尖锐度都区分不了
+        # "答得了/答不了"（校准见 scripts/calibrate_confidence.py），模型判断更可靠。
+        if _looks_unsure(reply.content) and not case_used:
+            case_obs, _ = execute(
+                "search_cases", {"query": state.get("question", ""), "top_k": 3}
+            )
+            if "cases/" in case_obs:
+                extra_steps.append(
+                    _step(
+                        state,
+                        type="tool",
+                        thought="模型判断知识库不足，先补充内部工单案例",
+                        tool="search_cases",
+                        args={"query": state.get("question", "")},
+                        observation=case_obs,
+                    )
+                )
+                emit("reset", {})
+                messages = messages + [
+                    SystemMessage(
+                        content=(
+                            "【补充：内部工单案例】（来自历史结单沉淀，非官方文档，"
+                            "引用时请注明「参考历史工单案例」）\n\n" + case_obs
+                        )
+                    ),
+                    HumanMessage(content="请结合上面的历史工单案例，重新给出完整回答。"),
+                ]
+                reply = self._generate(messages)
+                case_used = True
+
+        # ② 补了案例还答不了 → 去网上搜
         if settings.web_fallback and not web_used and _looks_unsure(reply.content):
             web_obs, _ = execute(
                 "web_search", {"query": state.get("question", ""), "top_k": settings.web_topk}
@@ -287,13 +321,12 @@ class GraphAgent:
                     _step(
                         state,
                         type="tool",
-                        thought="模型判断知识库不足，降级到网页搜索",
+                        thought="补充案例后仍不足，降级到网页搜索",
                         tool="web_search",
                         args={"query": state.get("question", "")},
                         observation=web_obs,
                     )
                 )
-                # 已经流式推给前端的草稿要作废，通知前端清空
                 emit("reset", {})
                 messages = messages + [
                     SystemMessage(
@@ -311,10 +344,12 @@ class GraphAgent:
         for s in extra_steps:
             merged_steps.append(s["steps"][-1])
 
+        suffix = "（已补充案例）" if case_used else ""
+        suffix += "（已补充网络搜索）" if web_used else ""
         step = _step(
             {**state, "steps": merged_steps},
             type="answer",
-            thought="基于检索结果生成回答" + ("（已补充网络搜索）" if web_used else ""),
+            thought="基于检索结果生成回答" + suffix,
             observation=reply.content,
             latency_ms=int((time.time() - t0) * 1000),
             tokens=reply.total_tokens,
@@ -323,6 +358,7 @@ class GraphAgent:
             **step,
             "messages": [AIMessage(content=reply.content)],
             "answer": reply.content,
+            "case_used": case_used,
             "status": "done",
             "web_used": web_used,
             "tokens": state.get("tokens", 0) + reply.total_tokens,

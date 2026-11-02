@@ -112,6 +112,41 @@ def test_case_supplement_on_history_query() -> None:
     assert "cases/" in out, out[:300]
 
 
+def test_search_cases_only_returns_cases() -> None:
+    """search_cases 是独立一路召回，结果必须全部来自 cases/*。"""
+    out = execute("search_cases", {"query": "WSL2 起不来", "top_k": 3})[0]
+    assert "cases/" in out, out[:200]
+    assert "manuals/" not in out, f"混进了官方文档：{out[:300]}"
+
+
+class _UnsureThenAnswerLLM:
+    """第一次回答自称"没找到"，用来触发级联降级；之后正常作答。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def chat(self, messages, tools=None, temperature=None, max_tokens=None):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMReply(
+                content="知识库中没有找到相关内容，无法回答这个问题。",
+                prompt_tokens=10,
+                completion_tokens=10,
+            )
+        return LLMReply(content="根据历史工单案例，可以这样处理……", prompt_tokens=10, completion_tokens=10)
+
+
+def test_unsure_answer_triggers_case_before_web() -> None:
+    """模型自评"资料不足"时，应当先补工单案例，而不是直接上网。"""
+    from uuid import uuid4
+
+    agent = Agent(llm=_UnsureThenAnswerLLM(), confirm=lambda n, a: True, persist_trace=False)
+    res = agent.run("容器启动不了怎么办", session_id=f"t-{uuid4().hex[:8]}")
+    tools_called = [s.tool for s in res.steps if s.type == "tool"]
+    assert "search_cases" in tools_called, f"没有先补案例，实际调用：{tools_called}"
+    assert "web_search" not in tools_called, f"不应直接上网：{tools_called}"
+
+
 # --------------------------------------------------------------------------- #
 # ReAct 中间件：重复调用拦截
 # --------------------------------------------------------------------------- #

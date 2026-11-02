@@ -45,11 +45,15 @@ class Hit:
     heading_path: str = ""
     doc_id: str = ""
     source: str = ""  # vector / bm25 / fused / rerank
+    # 向量余弦相似度（0~1，绝对值可比）。RRF 融合分只反映"名次"，
+    # 不能用来判断"这条到底像不像"，所以单独带出来做置信度门槛。
+    vec_score: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "score": round(self.score, 6),
+            "vec_score": round(self.vec_score, 4),
             "doc_id": self.doc_id,
             "heading_path": self.heading_path,
             "content": self.content,
@@ -84,6 +88,7 @@ class Reranker:
                 Hit(
                     id=hit.id,
                     score=float(s),
+                    vec_score=hit.vec_score,
                     content=hit.content,
                     heading_path=hit.heading_path,
                     doc_id=hit.doc_id,
@@ -273,7 +278,7 @@ class Retriever:
 
         if mode == "vector":
             ranked = keep(self._vector_search(query, fetch_k))
-            return self._hydrate(ranked[:top_k], "vector")
+            return self._hydrate(ranked[:top_k], "vector", dict(ranked))
 
         if mode == "bm25":
             ranked = keep(self._bm25_search(query, fetch_k, rewrite=rewrite))
@@ -295,11 +300,12 @@ class Retriever:
 
         fused = rrf_fuse(rankings, k=k_rrf, top_k=fetch_k)
         fused = keep(fused)
+        vec_map = dict(vec_rank)
 
         if mode == "hybrid":
-            return self._hydrate(fused[:top_k], "fused")
+            return self._hydrate(fused[:top_k], "fused", vec_map)
 
-        candidates = keep_hits(self._hydrate(fused[:n_rerank], "fused"))
+        candidates = keep_hits(self._hydrate(fused[:n_rerank], "fused", vec_map))
         return self.reranker.rerank(query, candidates, top_k)
 
     # ---------- 黑名单 / 白名单 ----------
@@ -321,7 +327,12 @@ class Retriever:
         return True
 
     # ---------- 回填正文 ----------
-    def _hydrate(self, ranked: list[tuple[str, float]], source: str) -> list[Hit]:
+    def _hydrate(
+        self,
+        ranked: list[tuple[str, float]],
+        source: str,
+        vec_scores: dict[str, float] | None = None,
+    ) -> list[Hit]:
         """批量取回正文（后端无关，一次调用）。"""
         if not ranked:
             return []
@@ -329,6 +340,7 @@ class Retriever:
         rows = self.store.get_by_ids(ids)
         by_id = {r["id"]: r for r in rows}
         score_map = dict(ranked)
+        vec_scores = vec_scores or {}
         out: list[Hit] = []
         for cid in ids:  # 保持召回顺序
             r = by_id.get(cid)
@@ -338,6 +350,7 @@ class Retriever:
                 Hit(
                     id=cid,
                     score=score_map.get(cid, 0.0),
+                    vec_score=vec_scores.get(cid, 0.0),
                     content=r.get("content", ""),
                     heading_path=r.get("heading_path", ""),
                     doc_id=r.get("doc_id", ""),

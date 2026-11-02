@@ -95,17 +95,22 @@ def _fmt_hit(idx: int, hit, label_prefix: str = "") -> str:
     )
 
 
-def _needs_case_supplement(query: str, has_main: bool) -> bool:
+def _needs_case_supplement(query: str, has_main: bool, top_vec_score: float = 1.0) -> bool:
     """什么时候把工单案例作为补充召回。
 
-    两个触发条件（都是确定性的，不额外花 LLM 调用）：
+    三个触发条件（都是确定性的，不额外花 LLM 调用）：
       1. 主检索一条都没有 → 案例是最后的内部依据；
-      2. 用户在问历史/别人的经验 → 本来就该给案例。
-    其余情况不召回，避免像 release-notes 那样污染主排序。
+      2. 主检索**置信度低**（Top-1 向量余弦 < case_gate_vec_score）→ 检索偏弱，补一路案例；
+      3. 用户在问历史/别人的经验 → 本来就该给案例。
+
+    门槛的定位要看清：它只能识别"检索明显偏弱"，**不能**判断"知识库答不了"
+    （校准数据见 scripts/calibrate_confidence.py）。真正的"答不了"由生成阶段自评兜底。
     """
     if settings.case_inline:
         return False  # 旧行为：案例已经混在主结果里了
     if not has_main:
+        return True
+    if top_vec_score < settings.case_gate_vec_score:
         return True
     return any(k in query for k in CASE_HINTS)
 
@@ -113,9 +118,10 @@ def _needs_case_supplement(query: str, has_main: bool) -> bool:
 def search_knowledge(query: str, top_k: int = 5) -> str:
     """在知识库里检索，返回带出处的片段。
 
-    分两路：
+    级联降级：
       · 主召回：官方文档（排除 release-notes 与工单案例）
-      · 补充召回：工单案例（仅在需要时，单独成段，标注为"内部沉淀"）
+      · 补充召回：工单案例——仅当「主检索为空 / 置信度低 / 用户问历史」时追加
+    两路都空 → 返回"没有找到"标记，由上层触发网页搜索。
     """
     r = _get_retriever()
     exclude = list(settings.exclude_prefixes)
@@ -129,10 +135,11 @@ def search_knowledge(query: str, top_k: int = 5) -> str:
         rewrite=True,
         exclude=exclude,
     )
+    top_vec = hits[0].vec_score if hits else 0.0
 
     blocks = [_fmt_hit(i, h) for i, h in enumerate(hits, 1)]
 
-    if _needs_case_supplement(query, bool(hits)):
+    if _needs_case_supplement(query, bool(hits), top_vec):
         cases = r.search(
             query,
             mode="hybrid",
@@ -142,14 +149,33 @@ def search_knowledge(query: str, top_k: int = 5) -> str:
             only=[settings.case_docs_prefix],
         )
         if cases:
-            blocks.append(
-                "\n【历史工单案例】（内部沉淀，仅供参考；结论要结合当前环境复核）"
-            )
+            reason = "主检索无结果" if not hits else f"主检索置信度偏低({top_vec:.2f})"
+            blocks.append(f"\n【历史工单案例】（{reason}，内部沉淀，仅供参考）")
             blocks += [_fmt_hit(i, h, "C") for i, h in enumerate(cases, 1)]
 
     if not blocks:
         return "知识库中没有找到相关内容。"
     return "\n".join(blocks)
+
+
+def search_cases(query: str, top_k: int = 3) -> str:
+    """只搜工单案例（内部沉淀的结单记录）。
+
+    与 search_knowledge 分开，是因为案例短、高频词多，混在主排序里会污染排名
+    （实测出现在 17/60 题的 Top-5 且全是噪声）。单独一路按需召回才安全。
+    """
+    r = _get_retriever()
+    cases = r.search(
+        query,
+        mode="hybrid",
+        top_k=max(1, min(int(top_k or 3), 5)),
+        rewrite=True,
+        exclude=settings.exclude_prefixes,
+        only=[settings.case_docs_prefix],
+    )
+    if not cases:
+        return "没有找到相关的历史工单案例。"
+    return "\n".join(_fmt_hit(i, h, "C") for i, h in enumerate(cases, 1))
 
 
 def web_search(query: str, top_k: int = 5) -> str:
@@ -348,6 +374,22 @@ TOOLS: dict[str, Tool] = {
             "required": [],
         },
         fn=query_tickets,
+    ),
+    "search_cases": Tool(
+        name="search_cases",
+        description=(
+            "只搜内部历史工单案例（已结单的处置记录）。当官方文档没覆盖、"
+            "或者用户问「之前有没有类似问题」时使用。引用时注明「参考历史工单案例」。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "问题描述或现象关键词"},
+                "top_k": {"type": "integer", "description": "返回条数，默认 3"},
+            },
+            "required": ["query"],
+        },
+        fn=search_cases,
     ),
     "web_search": Tool(
         name="web_search",

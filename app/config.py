@@ -127,10 +127,15 @@ class Settings(BaseSettings):
 
     # ---------- 工单案例（闭环产生，单独一路召回）----------
     # 实测：案例只有 6 个 chunk 却含大量高频词，会出现在 17/60 题的 Top-5 且全是噪声。
-    # 所以默认**不进主排序**，只在「主检索为空」或「用户问到历史/工单」时补充召回。
+    # 所以默认**不进主排序**，只在「主检索为空 / 置信度低 / 用户问到历史工单」时补充召回。
     case_docs_prefix: str = "cases/"
     case_inline: bool = False  # True = 案例参与主排序（旧行为，会污染排名）
     case_supplement_topk: int = 3
+    # 置信度门槛：主检索 Top-1 的向量余弦低于此值 → 视为"检索偏弱"，追加案例召回。
+    # 校准见 scripts/calibrate_confidence.py（60 可答 + 5 不可答实测）。
+    # 重要：这个分数**区分不了"知识库答不了"**（可答中位数 0.630 vs 不可答 0.583，
+    # 重排分/尖锐度同样分不开），只能识别"检索明显偏弱"；"答不了"由生成阶段自评兜底。
+    case_gate_vec_score: float = 0.55
 
     # ---------- 重排后端 ----------
     rerank_provider: str = "bailian"  # bailian（gte-rerank API）| local（bge-reranker）
