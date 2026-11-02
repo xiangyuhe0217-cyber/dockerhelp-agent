@@ -230,3 +230,7 @@ docker exec ruoyi-ai-redis redis-cli -n 1 keys "dockerhelp:*"
 3. 工单案例为什么要走"和官方文档相同的切片流程"，而不是单独建一个案例索引？
 4. 双语 BM25 让 hit@5 掉了 1.6pp，你认为值不值？如果让你优化，怎么把两者都拿到？
 5. `resolve_ticket` 是写操作，为什么还要 `interrupt` 确认？它和 `create_ticket` 的确认有什么区别？
+
+---
+
+> **口径说明（W8.1 追加）**：本文数字按当时的 60 题口径测得。W8.1 把 q050（语料缺失）复核为不可答后，分母变为 59 可答 + 6 拒答；最新口径见 [reports/eval_report.md](../reports/eval_report.md) 与 [docs/w8-report.md](w8-report.md)。

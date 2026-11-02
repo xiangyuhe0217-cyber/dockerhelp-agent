@@ -129,3 +129,7 @@ python scripts/run_eval.py --report-only
 3. 如果重排候选从 20 扩到 50，延迟会怎么变？值不值？
 4. 为什么 BM25 在 hard 题上表现比 easy 题好？这对"该不该保留 BM25 这一路"有什么启示？
 5. 你的 gold 标注用路径前缀，如果一个 query 的正确答案分散在 3 篇文档里，recall@5 会怎么算？
+
+---
+
+> **口径说明（W8.1 追加）**：本文数字按当时的 60 题口径测得。W8.1 把 q050（语料缺失）复核为不可答后，分母变为 59 可答 + 6 拒答；最新口径见 [reports/eval_report.md](../reports/eval_report.md) 与 [docs/w8-report.md](w8-report.md)。

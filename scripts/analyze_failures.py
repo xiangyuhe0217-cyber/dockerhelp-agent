@@ -41,15 +41,24 @@ def first_rel_rank(rel: list[int]) -> int | None:
 ASCII_TERM = __import__("re").compile(r"[A-Za-z][A-Za-z0-9_.\-]{2,}")
 
 
-def corpus_contains_all(conn, terms: list[str]) -> bool:
-    """语料里是否存在**同时包含**这些词的文档（用于判断"这题到底答不答得了"）。"""
+def term_coverage(conn, terms: list[str]) -> tuple[int, list[str]]:
+    """关键术语在语料中的覆盖率：有多少个词**在任意 chunk 里出现过**。
+
+    为什么不用"所有词同现"：实测定过死。q026 问的 "WSL2/vmmem"，语料里写的是
+    "WSL" 和 "vmmem.exe"；q041 问的 "docker.sock"，语料里写的是 "daemon socket"。
+    同现判定会把这两题误判成"语料缺失"，其实答案就在文档里（属于召回问题）。
+    所以改成逐词看"有没有出现过"，任一词零出现才算真正的缺失信号。
+    """
     if not terms:
-        return True
-    sql = "SELECT COUNT(*) AS c FROM chunks WHERE " + " AND ".join(
-        ["LOWER(content) LIKE ?"] * len(terms)
-    )
-    params = [f"%{t.lower()}%" for t in terms]
-    return conn.execute(sql, params).fetchone()[0] > 0
+        return -1, []  # 纯中文题：无法自动判断，交给人工
+    found = []
+    for t in terms:
+        n = conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE LOWER(content) LIKE ?", (f"%{t.lower()}%",)
+        ).fetchone()[0]
+        if n:
+            found.append(t)
+    return len(found), found
 
 
 def main() -> int:
@@ -80,21 +89,25 @@ def main() -> int:
         gold_in_corpus = [
             g for g in golds if any(p.startswith(g) for p in doc_paths_all)
         ]
-        # 语料里是否同时出现题目里的英文关键词（TLS/handshake/vmmem 这类）
+        # 语料里出现过几个题目关键词（TLS/handshake/vmmem 这类）
         terms = [t for t in ASCII_TERM.findall(c.get("question", ""))][:3]
-        has_terms = corpus_contains_all(conn, terms)
+        n_found, found_terms = term_coverage(conn, terms)
         if rank is not None and rank > 5:
             kind = "C"
             reason = f"第 {rank} 名命中"
         elif not gold_in_corpus:
             kind = "A"
             reason = "gold 文档不在语料中"
-        elif not has_terms:
+        elif n_found == 0:
             kind = "A"
-            reason = f"关键术语（{'/'.join(terms)}）在语料中无同现"
+            reason = f"关键术语（{'/'.join(terms)}）在语料中一次都没出现"
         else:
             kind = "B"
-            reason = "语料有相关段落但未召回"
+            reason = (
+                "语料有相关段落但未召回"
+                if n_found > 0
+                else "纯中文题，无法自动判断（需人工复核）"
+            )
         rows.append(
             {
                 "id": c["case_id"],
@@ -108,7 +121,7 @@ def main() -> int:
                 "golds": golds,
                 "gold_in_corpus": gold_in_corpus,
                 "terms": terms,
-                "has_terms": has_terms,
+                "terms_found": found_terms,
                 "retrieved": [p for p in (c.get("doc_paths") or []) if p][:5],
             }
         )
